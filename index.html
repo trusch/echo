@@ -377,10 +377,13 @@ function makeVideoTex () {
 }
 const vidTex = [makeVideoTex(), makeVideoTex()];
 let vidCur = 0, vidFrames = 0;
+const vfcSupported = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+let newFrame = false;
+function onVFC () { newFrame = true; video.requestVideoFrameCallback(onVFC); }
 function uploadVideo (now) {
   let src = null;
   if (usingGhost) { drawGhost(now); src = ghost; }
-  else if (video.readyState >= 2) src = video;
+  else if (video.readyState >= 2 && (!vfcSupported || newFrame)) { src = video; newFrame = false; }
   if (!src) return;
   vidCur = 1 - vidCur;
   gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]);
@@ -560,10 +563,11 @@ document.getElementById('open').addEventListener('click', async () => {
     });
     video.srcObject = stream;
     if (!video.isConnected) {
-      video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.001;pointer-events:none;';
+      video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;pointer-events:none;';
       document.body.appendChild(video);
     }
     await video.play();
+    if (vfcSupported) video.requestVideoFrameCallback(onVFC);
   } catch (err) {
     makeGhost();
     setTimeout(() => toast('no camera — mirroring a ghost instead'), 1200);
