@@ -811,29 +811,9 @@ function ignite () {
   setTimeout(() => { hint.style.opacity = '0'; setTimeout(() => hint.remove(), 800); }, 6000);
   lastInteraction = performance.now();
   shockwave(0.5, 0.5);
-  // iOS tilt permission must be requested inside a gesture
-  if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function')
-    DeviceOrientationEvent.requestPermission().then(s => { if (s === 'granted') listenTilt(); }).catch(() => {});
-  else listenTilt();
 }
 document.getElementById('open').addEventListener('click', () => { if (!ignited) ignite(); });
 document.getElementById('camretry').addEventListener('click', () => { toast('asking for the camera…'); startCamera(); });
-
-/* tilt → gentle gravity current */
-let tilt = { x: 0, y: 0 };
-function listenTilt () {
-  window.addEventListener('deviceorientation', e => {
-    if (e.gamma == null || e.beta == null) return;
-    tilt.x = Math.max(-1, Math.min(1, e.gamma / 45));
-    tilt.y = Math.max(-1, Math.min(1, e.beta / 45));
-  });
-}
-function applyTilt () {
-  const mag = Math.hypot(tilt.x, tilt.y);
-  if (mag < 0.12) return;
-  const x = Math.random(), y = Math.random();
-  splat(x, y, tilt.x * 220 * mag, -tilt.y * 220 * mag, { r: 0, g: 0, b: 0 });
-}
 
 /* idle autopilot — paints by itself */
 const emitters = [
@@ -1416,7 +1396,6 @@ function tick (now) {
     if (++slowFrames > 90) { config.DYE_RES = 384; initFramebuffers(); slowFrames = -1e9; }
   } else if (slowFrames > 0) slowFrames--;
   applyInputs();
-  applyTilt();
   autopilot(now);
   Audio.drone(now - lastInteraction < 8000); // autopilot doesn't bump lastInteraction
   if (ignited) uploadVideo(now);
