@@ -748,7 +748,7 @@ function applyInputs () {
       p.moved = false;
       splat(p.texcoordX, p.texcoordY, p.deltaX * config.SPLAT_FORCE, p.deltaY * config.SPLAT_FORCE, p.color);
       const speed = Math.hypot(p.deltaX, p.deltaY);
-      if (now - p.lastNoteTime > 95 && speed > 0.002) {
+      if (now - p.lastNoteTime > 130 && speed > 0.002) {
         p.lastNoteTime = now;
         Audio.pluck(p.texcoordX, p.texcoordY, Math.min(1, speed * 60));
       }
@@ -802,6 +802,7 @@ async function startCamera () {
     if (p && p.catch) p.catch(() => { needPlayKick = true; });
     camStartT = performance.now();
     vidFrames = 0;
+    armTrackReader(stream);
     if (vfcSupported) video.requestVideoFrameCallback(onVFC);
   } catch (err) {
     if (!ghost) makeGhost();
@@ -858,6 +859,7 @@ const Audio = (() => {
   let ctx = null, bus = null, wet = null, muted = false, droneGain = null;
   let droneEnv = null, droneOn = false;
   let pendingPluck = null, pendingBoom = false, unlockHooked = false;
+  let voiceCount = 0, lastPluckT = 0;   // polyphony budget — multi-finger painting must not crackle
   const SCALE = [0, 2, 4, 7, 9]; // major pentatonic
   /* Mobile browsers create AudioContexts 'suspended' and don't always honor
      resume() from pointerdown (iOS only unlocks on touchend). Kick the lock
@@ -945,25 +947,31 @@ const Audio = (() => {
     if (!ctx || muted) return;
     if (ctx.state !== 'running') { pendingPluck = { x, y, v: vel }; unlock(); return; }
     const t = ctx.currentTime;
+    if (t - lastPluckT < 0.05 || voiceCount >= 8) return;
+    lastPluckT = t;
     const octave = Math.floor(y * 2.4);              // higher on screen = higher pitch
     const deg = SCALE[Math.floor(x * 5 + Math.random()) % 5];
     const midi = 57 + deg + 12 * octave;
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    const rich = voiceCount < 4;            // octave partner only when calm
     const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq;
-    const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = freq * 2.001;
+    const o2 = rich ? ctx.createOscillator() : null;
+    if (o2) { o2.type = 'sine'; o2.frequency.value = freq * 2.001; }
     const f = ctx.createBiquadFilter(); f.type = 'lowpass';
     f.frequency.value = 700 + 2600 * y; f.Q.value = 1.2;
     const g = ctx.createGain();
-    const peak = 0.05 + 0.16 * vel;
+    const peak = (0.05 + 0.16 * vel) / (1 + voiceCount * 0.18);
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(peak, t + 0.008);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9 + Math.random() * 0.6);
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    o.connect(f); o2.connect(f); f.connect(g);
+    o.connect(f); if (o2) o2.connect(f); f.connect(g);
     if (pan) { pan.pan.value = x * 1.6 - 0.8; g.connect(pan); pan.connect(bus); }
     else g.connect(bus);
-    o.start(t); o2.start(t);
-    o.stop(t + 1.8); o2.stop(t + 1.8);
+    voiceCount++;
+    o.onended = () => { voiceCount = Math.max(0, voiceCount - 1); };
+    o.start(t); if (o2) o2.start(t);
+    o.stop(t + 1.6); if (o2) o2.stop(t + 1.6);
   }
   function boom () {
     if (!ctx || muted) return;
@@ -1043,19 +1051,42 @@ let vidCur = 0, vidFrames = 0;
 const vfcSupported = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 let newFrame = false, camStartT = 0, camRestartT = 0;
 function onVFC () { newFrame = true; video.requestVideoFrameCallback(onVFC); }
+/* Stronger still: MediaStreamTrackProcessor reads VideoFrames straight off
+   the camera track — no video element, no compositor heuristics at all. */
+let pendingFrame = null, frameW = 0, frameH = 0;
+function armTrackReader (stream) {
+  if (!('MediaStreamTrackProcessor' in window)) return;
+  try {
+    const reader = new MediaStreamTrackProcessor({ track: stream.getVideoTracks()[0] }).readable.getReader();
+    (async function pump () {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        if (pendingFrame) pendingFrame.close();
+        pendingFrame = value;
+      }
+    })().catch(() => {});
+  } catch (e) {}
+}
 function uploadVideo (now) {
   let srcEl = null;
   if (usingGhost) { drawGhost(now); srcEl = ghost; }
+  else if (pendingFrame) {
+    srcEl = pendingFrame;
+    frameW = pendingFrame.displayWidth; frameH = pendingFrame.displayHeight;
+  }
   else if (video.readyState >= 2 && (!vfcSupported || newFrame)) { srcEl = video; newFrame = false; }
   if (!srcEl) return;
   vidCur = 1 - vidCur;
   gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcEl);
+  try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcEl); }
+  catch (e) { if (srcEl === pendingFrame) { pendingFrame.close(); pendingFrame = null; } return; }
+  if (srcEl === pendingFrame) { pendingFrame.close(); pendingFrame = null; }
   vidFrames++;
 }
 function coverFit () {
-  const vw = usingGhost ? 256 : (video.videoWidth || 640);
-  const vh = usingGhost ? 256 : (video.videoHeight || 480);
+  const vw = usingGhost ? 256 : (frameW || video.videoWidth || 640);
+  const vh = usingGhost ? 256 : (frameH || video.videoHeight || 480);
   const va = vw / vh, sa = canvas.clientWidth / canvas.clientHeight;
   return va > sa ? [sa / va, 1] : [1, va / sa];
 }
@@ -1103,7 +1134,9 @@ const edgeShader = `
     float bl = L(vUv + vec2(-px.x, -px.y)), b = L(vUv + vec2(0.0, -px.y)), br = L(vUv + vec2(px.x, -px.y));
     float gx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
     float gy = (tl + 2.0 * t + tr) - (bl + 2.0 * b + br);
-    float e = smoothstep(0.06, 0.45, length(vec2(gx, gy)));
+    float g = length(vec2(gx, gy));
+    float e = clamp((g - 0.02) * 5.0, 0.0, 1.0);
+    e = e / (e + 0.35) * 1.35;   /* soft knee: dim faces still raise the field */
     vec2 d = (vUv - uFace.xy) / uFace.zw;
     e *= smoothstep(1.3, 0.85, length(d));
     gl_FragColor = vec4(e, 0.0, 0.0, 1.0);
@@ -1253,9 +1286,13 @@ if ('FaceDetector' in window) {
       const vx = (b.x + b.width / 2) / vw, vy = (b.y + b.height / 2) / vh;
       const sx = 1 - (0.5 + (vx - 0.5) / fit[0]);      // un-cover-fit + un-mirror
       const syUp = 1 - (0.5 + (vy - 0.5) / fit[1]);
-      face.tx = sx; face.ty = syUp;
-      face.trx = Math.min(0.5, (b.width / vw) / fit[0] * 0.85);
-      face.try_ = Math.min(0.6, (b.height / vh) / fit[1] * 1.0);
+      const trx = (b.width / vw) / fit[0] * 0.85;
+      const try2 = (b.height / vh) / fit[1] * 1.0;
+      if (![sx, syUp, trx, try2].every(isFinite)) return;  // never poison the mask
+      face.tx = Math.min(0.95, Math.max(0.05, sx));
+      face.ty = Math.min(0.95, Math.max(0.05, syUp));
+      face.trx = Math.min(0.5, Math.max(0.08, trx));
+      face.try_ = Math.min(0.6, Math.max(0.1, try2));
     } catch (e) {}
   }, 350);
 }
@@ -1359,11 +1396,46 @@ document.getElementById('snd').addEventListener('click', function () {
   toast(muted ? 'sound off' : 'sound on');
 });
 document.getElementById('info').addEventListener('click', () => {
+  const now = performance.now();
+  infoTaps = infoTaps.filter(t => now - t < 900);
+  infoTaps.push(now);
+  if (infoTaps.length >= 3) { infoTaps = []; toggleHud(!hud); toast(hud ? 'debug on' : 'debug off'); return; }
   document.getElementById('about').classList.add('open');
 });
 document.getElementById('ab-close').addEventListener('click', () => {
   document.getElementById('about').classList.remove('open');
 });
+/* ---- debug HUD: open fluid.html#debug or triple-tap the info button ---- */
+let hud = null, hudTimer = 0;
+function edgeMean () {
+  try {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, edgeBlur.fbo);
+    const px = new Float32Array(16 * 16 * 4);
+    gl.readPixels((EDGE_RES >> 1) - 8, (EDGE_RES >> 1) - 8, 16, 16, gl.RGBA, gl.FLOAT, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    let s = 0;
+    for (let i = 0; i < px.length; i += 4) s += px[i];
+    return (s / 256).toFixed(3);
+  } catch (e) { return 'n/a'; }
+}
+function updateHud () {
+  if (!hud) return;
+  hud.textContent =
+    'frames ' + vidFrames + '  src ' + (usingGhost ? 'ghost' : (('MediaStreamTrackProcessor' in window) ? 'track' : 'element')) +
+    '\nvideo rs' + video.readyState + ' ' + (frameW || video.videoWidth || 0) + 'x' + (frameH || video.videoHeight || 0) + (video.paused ? ' PAUSED' : ' playing') +
+    '\nface ' + face.x.toFixed(2) + ',' + face.y.toFixed(2) + '  r ' + face.rx.toFixed(2) + ',' + face.ry.toFixed(2) + (('FaceDetector' in window) ? '  fd:yes' : '  fd:no') +
+    '\nedge@center ' + edgeMean();
+}
+function toggleHud (on) {
+  if (on && !hud) {
+    hud = document.createElement('div');
+    hud.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top,0px) + 46px);left:8px;z-index:40;color:#9f9;background:rgba(0,0,0,.6);font:10px/1.5 monospace;padding:6px 9px;border-radius:8px;white-space:pre;pointer-events:none;';
+    document.body.appendChild(hud);
+    hudTimer = setInterval(updateHud, 500);
+  } else if (!on && hud) { clearInterval(hudTimer); hud.remove(); hud = null; }
+}
+if (location.hash.indexOf('debug') >= 0) toggleHud(true);
+let infoTaps = [];
 let toastTimer = 0;
 function toast (msg) {
   const el = document.getElementById('toast');
