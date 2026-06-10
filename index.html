@@ -250,7 +250,7 @@ const drawVS = `#version 300 es
     }
     /* spectral: true color, lifted + iridescent tint by position */
     vec3 tint = 0.5 + 0.5 * cos(6.2831 * (home.xyx * vec3(0.7, 0.9, 0.4) + vec3(0.0, 0.33, 0.67)));
-    return cam * (0.35 + l * 1.1) + tint * l * 0.55;
+    return cam * (0.30 + l * 0.95) + tint * l * 0.40;
   }
   void main () {
     int i = gl_VertexID;
@@ -267,7 +267,7 @@ const drawVS = `#version 300 es
     vEnergy = clamp(speed * 9.0, 0.0, 1.0);
     vColor = palette(cam, l, home);
     gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-    gl_PointSize = uPointScale * (0.55 + l * 1.25) * (1.0 + vEnergy * 1.6);
+    gl_PointSize = uPointScale * (0.45 + l * 0.75) * (1.0 + vEnergy * 1.0);
   }`;
 
 const drawFS = `#version 300 es
@@ -278,8 +278,8 @@ const drawFS = `#version 300 es
   void main () {
     vec2 d = gl_PointCoord - 0.5;
     float r2 = dot(d, d);
-    float a = smoothstep(0.25, 0.03, r2);
-    frag = vec4(vColor * (1.0 + vEnergy * 1.8), 1.0) * a;
+    float a = smoothstep(0.25, 0.04, r2);
+    frag = vec4(vColor * (0.62 + vEnergy * 1.1), 1.0) * a;
   }`;
 
 function compile (type, src) {
@@ -699,7 +699,7 @@ function tick (now) {
     gl.uniform1f(drawProg.u.uGridW, GRID);
     gl.uniform1f(drawProg.u.uGridH, GRID);
     gl.uniform1f(drawProg.u.uAspect, canvas.clientWidth / canvas.clientHeight);
-    gl.uniform1f(drawProg.u.uPointScale, (gl.drawingBufferHeight / GRID) * 1.9);
+    gl.uniform1f(drawProg.u.uPointScale, (gl.drawingBufferHeight / GRID) * 1.25);
     gl.uniform1f(drawProg.u.uMode, mode);
     gl.uniform2f(drawProg.u.uFit, fit[0], fit[1]);
     gl.drawArrays(gl.POINTS, 0, GRID * GRID);
