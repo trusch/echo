@@ -777,6 +777,10 @@ function shockwave (x, y) {
   if (navigator.vibrate) navigator.vibrate([18, 30, 12]);
 }
 let needPlayKick = false;
+let lastVidKick = 0;
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && video.srcObject) video.play().catch(() => {});
+});
 async function startCamera () {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -786,6 +790,12 @@ async function startCamera () {
     video.srcObject = stream;
     usingGhost = false;
     document.getElementById('camretry').style.display = 'none';
+    /* iOS Safari won't advance frames of a detached (or display:none)
+       video element — it must live in the DOM, technically visible */
+    if (!video.isConnected) {
+      video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.001;pointer-events:none;';
+      document.body.appendChild(video);
+    }
     // don't await play(): if the gesture window has closed (iOS), the
     // rejection is caught and the next touch kicks it
     const p = video.play();
@@ -1399,6 +1409,13 @@ function tick (now) {
   autopilot(now);
   Audio.drone(now - lastInteraction < 8000); // autopilot doesn't bump lastInteraction
   if (ignited) uploadVideo(now);
+  /* watchdog: if the camera is granted but frames aren't flowing, keep
+     kicking play() — iPads stall the stream on first load otherwise */
+  if (ignited && !usingGhost && video.srcObject &&
+      (video.paused || video.readyState < 2) && now - lastVidKick > 1500) {
+    lastVidKick = now;
+    video.play().catch(() => {});
+  }
   if (ignited && vidFrames >= 2) fieldPasses();
   step(dt);
   render();

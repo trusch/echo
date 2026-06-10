@@ -559,6 +559,10 @@ document.getElementById('open').addEventListener('click', async () => {
       audio: false
     });
     video.srcObject = stream;
+    if (!video.isConnected) {
+      video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.001;pointer-events:none;';
+      document.body.appendChild(video);
+    }
     await video.play();
   } catch (err) {
     makeGhost();
@@ -641,6 +645,10 @@ function resizeCanvas () {
 resizeCanvas();
 
 const touchArr = new Float32Array(20);
+let lastVidKick = 0;
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && video.srcObject) video.play().catch(() => {});
+});
 let lastTime = performance.now();
 let frameEMA = 16, downgraded = false, slowSince = 0;
 
@@ -658,6 +666,11 @@ function tick (now) {
 
   if (opened) {
     uploadVideo(now);
+    if (!usingGhost && video.srcObject &&
+        (video.paused || video.readyState < 2) && now - lastVidKick > 1500) {
+      lastVidKick = now;
+      video.play().catch(() => {});
+    }
     Audio.pad(now - lastInteraction < 10000);
   }
 
