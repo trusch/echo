@@ -121,6 +121,7 @@
   <button class="pal" data-p="ocean" aria-label="ocean palette"></button>
   <div class="sep"></div>
   <button class="ib" id="snd" aria-label="toggle sound"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path id="sndwave" d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13"/></svg></button>
+  <button class="ib" id="camretry" style="display:none" aria-label="retry camera"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v4h-4"/></svg></button>
   <button class="ib" id="cam" aria-label="save image"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></button>
   <button class="ib" id="info" aria-label="about"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v6"/><path d="M12 7.2v.2"/></svg></button>
 </div>
@@ -145,6 +146,10 @@
 <div id="nogl">your browser doesn't support WebGL —<br>FLUX needs a GPU to dream on.</div>
 <script>
 'use strict';
+window.addEventListener('error', e => {
+  const t = document.getElementById('toast');
+  if (t) { t.textContent = 'error: ' + e.message; t.style.opacity = '1'; }
+});
 /* ============================================================
    FLUX — a living canvas
    real-time GPU fluid dynamics + generative music
@@ -699,6 +704,7 @@ window.addEventListener('pointerdown', e => {
   if (e.target.closest && e.target.closest('#ui, #about')) return;
   if (!ignited) return;
   lastInteraction = performance.now();
+  if (needPlayKick) { needPlayKick = false; video.play().catch(() => {}); }
   Audio.resume();
   const p = makePointer(e.pointerId, e.clientX, e.clientY);
   pointers.set(e.pointerId, p);
@@ -770,20 +776,31 @@ function shockwave (x, y) {
   Audio.boom();
   if (navigator.vibrate) navigator.vibrate([18, 30, 12]);
 }
-async function ignite () {
-  ignited = true;
-  Audio.init();
+let needPlayKick = false;
+async function startCamera () {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false
     });
     video.srcObject = stream;
-    await video.play();
+    usingGhost = false;
+    document.getElementById('camretry').style.display = 'none';
+    // don't await play(): if the gesture window has closed (iOS), the
+    // rejection is caught and the next touch kicks it
+    const p = video.play();
+    if (p && p.catch) p.catch(() => { needPlayKick = true; });
   } catch (err) {
-    makeGhost();
-    setTimeout(() => toast('no camera — mirroring a ghost instead'), 1500);
+    if (!ghost) makeGhost();
+    usingGhost = true;
+    toast('camera unavailable (' + ((err && err.name) || 'error') + ') — tap \u27f3 to retry');
+    document.getElementById('camretry').style.display = 'flex';
   }
+}
+function ignite () {
+  ignited = true;
+  Audio.init();
+  startCamera();
   const gate = document.getElementById('gate');
   gate.style.opacity = '0';
   setTimeout(() => gate.remove(), 1200);
@@ -800,6 +817,7 @@ async function ignite () {
   else listenTilt();
 }
 document.getElementById('open').addEventListener('click', () => { if (!ignited) ignite(); });
+document.getElementById('camretry').addEventListener('click', () => { toast('asking for the camera…'); startCamera(); });
 
 /* tilt → gentle gravity current */
 let tilt = { x: 0, y: 0 };
@@ -978,8 +996,9 @@ const Audio = (() => {
   return { init, resume, pluck, boom, toggle, drone };
 })();
 
-/* ---------------- the mirror: camera + fluid-riding particles ---------------- */
+/* ---------------- the mirror: camera as a force field ---------------- */
 const GRID = 256;                       // 65,536 particles
+const EDGE_RES = 256;
 const video = document.createElement('video');
 video.playsInline = true; video.muted = true; video.autoplay = true;
 video.setAttribute('playsinline', '');
@@ -992,16 +1011,14 @@ function makeGhost () {
 }
 function drawGhost (t) {
   const c = ghostCtx, w = 256, h = 256;
-  c.fillStyle = '#06100a'; c.fillRect(0, 0, w, h);
-  for (let i = 0; i < 4; i++) {
-    const x = w / 2 + Math.sin(t * 0.0005 * (i + 1) + i * 2.1) * 70;
-    const y = h / 2 + Math.cos(t * 0.0004 * (i + 1) + i * 1.3) * 70;
-    const g = c.createRadialGradient(x, y, 4, x, y, 80);
-    g.addColorStop(0, 'hsla(' + ((t * 0.02 + i * 40) % 80 + 90) + ',80%,62%,0.8)');
-    g.addColorStop(1, 'transparent');
-    c.fillStyle = g;
-    c.beginPath(); c.arc(x, y, 80, 0, 7); c.fill();
-  }
+  c.fillStyle = '#04100a'; c.fillRect(0, 0, w, h);
+  // a ghost with an outline, so the edge field has something to hold
+  const x = w / 2 + Math.sin(t * 0.0004) * 26, y = h * 0.44 + Math.cos(t * 0.0005) * 14;
+  c.strokeStyle = 'rgba(180,255,200,0.9)'; c.lineWidth = 5;
+  c.beginPath(); c.ellipse(x, y, 52, 66, 0, 0, 7); c.stroke();
+  c.beginPath(); c.ellipse(x - 20, y - 12, 7, 10, 0, 0, 7); c.stroke();
+  c.beginPath(); c.ellipse(x + 20, y - 12, 7, 10, 0, 0, 7); c.stroke();
+  c.beginPath(); c.arc(x, y + 26, 16, 0.3, Math.PI - 0.3); c.stroke();
 }
 function makeVideoTex () {
   const t = gl.createTexture();
@@ -1035,20 +1052,68 @@ function coverFit () {
 /* particle state: (offsetX, offsetY, velX, velY) in screen01 units, y down */
 const pState = createDoubleFBO(GRID, GRID,
   ext.formatRGBA.internalFormat, ext.formatRGBA.format, ext.halfFloatTexType, gl.NEAREST);
+gl.clearColor(0, 0, 0, 0);
+gl.bindFramebuffer(gl.FRAMEBUFFER, pState.read.fbo); gl.clear(gl.COLOR_BUFFER_BIT);
+gl.bindFramebuffer(gl.FRAMEBUFFER, pState.write.fbo); gl.clear(gl.COLOR_BUFFER_BIT);
+gl.clearColor(0, 0, 0, 1);
 
-/* per-palette duotone ramps for the face */
+/* edge field: raw sobel -> 2-pass blur = smooth attraction potential */
+const edgeFilter = ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
+const edgeRaw  = createFBO(EDGE_RES, EDGE_RES, ext.formatR.internalFormat, ext.formatR.format, ext.halfFloatTexType, edgeFilter);
+const edgeTmp  = createFBO(EDGE_RES, EDGE_RES, ext.formatR.internalFormat, ext.formatR.format, ext.halfFloatTexType, edgeFilter);
+const edgeBlur = createFBO(EDGE_RES, EDGE_RES, ext.formatR.internalFormat, ext.formatR.format, ext.halfFloatTexType, edgeFilter);
+
+/* per-palette duotone ramps for the embers */
 const RAMPS = {
-  matrix:  [[0.00, 0.08, 0.02], [0.45, 1.00, 0.55]],
-  aurora:  [[0.00, 0.05, 0.12], [0.45, 0.90, 1.00]],
-  inferno: [[0.12, 0.02, 0.00], [1.00, 0.72, 0.30]],
-  ocean:   [[0.00, 0.04, 0.12], [0.30, 0.80, 1.00]],
+  matrix:  [[0.00, 0.05, 0.01], [0.45, 1.00, 0.55]],
+  aurora:  [[0.00, 0.03, 0.08], [0.45, 0.90, 1.00]],
+  inferno: [[0.08, 0.01, 0.00], [1.00, 0.72, 0.30]],
+  ocean:   [[0.00, 0.03, 0.08], [0.30, 0.80, 1.00]],
 };
 
-/* particles ride the fluid, springs pull them home */
+/* sobel edges of the camera, masked by the face ellipse */
+const edgeShader = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D uVideo;
+  uniform vec2 uFit;
+  uniform vec4 uFace;     // ellipse center xy (y-up screen01) + half extents
+  float lum (vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+  vec2 videoUv (vec2 suv) {
+    vec2 s = vec2(suv.x, 1.0 - suv.y);
+    vec2 v = vec2(1.0 - s.x, s.y);
+    return 0.5 + (v - 0.5) * uFit;
+  }
+  float L (vec2 suv) { return lum(texture2D(uVideo, videoUv(suv)).rgb); }
+  void main () {
+    vec2 px = vec2(1.0 / 256.0);
+    float tl = L(vUv + vec2(-px.x,  px.y)), t = L(vUv + vec2(0.0,  px.y)), tr = L(vUv + vec2(px.x,  px.y));
+    float l  = L(vUv + vec2(-px.x,  0.0)),                                  r = L(vUv + vec2(px.x,  0.0));
+    float bl = L(vUv + vec2(-px.x, -px.y)), b = L(vUv + vec2(0.0, -px.y)), br = L(vUv + vec2(px.x, -px.y));
+    float gx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+    float gy = (tl + 2.0 * t + tr) - (bl + 2.0 * b + br);
+    float e = smoothstep(0.06, 0.45, length(vec2(gx, gy)));
+    vec2 d = (vUv - uFace.xy) / uFace.zw;
+    e *= smoothstep(1.3, 0.85, length(d));
+    gl_FragColor = vec4(e, 0.0, 0.0, 1.0);
+  }`;
+const blurShader = `
+  precision mediump float;
+  varying vec2 vUv;
+  uniform sampler2D uTexture;
+  uniform vec2 uDir;
+  void main () {
+    float s = texture2D(uTexture, vUv).x * 0.227;
+    s += (texture2D(uTexture, vUv + uDir * 1.384).x + texture2D(uTexture, vUv - uDir * 1.384).x) * 0.316;
+    s += (texture2D(uTexture, vUv + uDir * 3.230).x + texture2D(uTexture, vUv - uDir * 3.230).x) * 0.070;
+    gl_FragColor = vec4(s, 0.0, 0.0, 1.0);
+  }`;
+
+/* particles: ride the fluid, drawn to the outline, captured on its ridges */
 const particleSimShader = `
   precision highp float;
   varying vec2 vUv;
-  uniform sampler2D uState, uFluidVel;
+  uniform sampler2D uState, uFluidVel, uEdge;
   uniform vec2 uVelTexel;
   uniform float uDt, uTime;
   vec2 hash22 (vec2 p) {
@@ -1060,15 +1125,23 @@ const particleSimShader = `
     vec4 st = texture2D(uState, vUv);
     vec2 off = st.xy, vel = st.zw;
     vec2 pos = vUv + off;                       // screen01, y down
-    /* ride the fluid: drag toward the local flow velocity */
-    vec2 fuv = vec2(pos.x, 1.0 - pos.y);        // fluid field is y-up
+    vec2 fuv = vec2(pos.x, 1.0 - pos.y);        // field space, y up
+    /* ride the fluid */
     vec2 fv = texture2D(uFluidVel, fuv).xy;
-    vec2 fvS = vec2(fv.x * uVelTexel.x, -fv.y * uVelTexel.y);  // -> uv/s, y down
-    vec2 acc = (fvS * 1.5 - vel) * 6.0;
-    /* spring home: the face always reassembles */
-    acc -= off * 6.5;
-    /* shimmer */
-    acc += (hash22(vUv * 413.7 + fract(uTime) * 17.3) - 0.5) * 0.12;
+    vec2 fvS = vec2(fv.x * uVelTexel.x, -fv.y * uVelTexel.y);
+    vec2 acc = (fvS * 1.4 - vel) * 5.0;
+    /* invisible attraction: climb the blurred edge potential */
+    vec2 e2 = vec2(1.5 / 256.0, 0.0);
+    float E  = texture2D(uEdge, fuv).x;
+    vec2 grad = vec2(
+      texture2D(uEdge, fuv + e2.xy).x - texture2D(uEdge, fuv - e2.xy).x,
+      texture2D(uEdge, fuv + e2.yx).x - texture2D(uEdge, fuv - e2.yx).x);
+    acc += vec2(grad.x, -grad.y) * 16.0;
+    /* the outline captures passing particles */
+    acc -= vel * E * 8.0;
+    /* weak centering so coverage never collapses */
+    acc -= off * 0.9;
+    acc += (hash22(vUv * 413.7 + fract(uTime) * 17.3) - 0.5) * 0.2;
     vel += acc * uDt;
     off += vel * uDt;
     gl_FragColor = vec4(off, vel);
@@ -1092,61 +1165,53 @@ const flowVelShader = `
     float gx = lum(texture2D(uVideo, vuv + vec2(px.x, 0.0)).rgb) - lum(texture2D(uVideo, vuv - vec2(px.x, 0.0)).rgb);
     float gy = lum(texture2D(uVideo, vuv + vec2(0.0, px.y)).rgb) - lum(texture2D(uVideo, vuv - vec2(0.0, px.y)).rgb);
     vec2 flow = vec2(gx, gy) * clamp((lc - lp) * 4.0, -1.0, 1.0);
-    flow.x = -flow.x;   /* un-mirror */
-    flow.y = -flow.y;   /* screen y-down -> fluid y-up */
+    flow.x = -flow.x;
+    flow.y = -flow.y;
     gl_FragColor = vec4(texture2D(uVelocity, vUv).xy + flow * uAmp, 0.0, 1.0);
   }`;
 
-/* ...and faintly paints: motion deposits dye */
+/* the outline glows in the ink itself: edge field deposits dye */
 const flowDyeShader = `
   precision highp float;
   varying vec2 vUv;
-  uniform sampler2D uDye, uVideo, uPrev;
-  uniform vec2 uFit;
+  uniform sampler2D uDye, uEdge;
   uniform vec3 uTint;
-  float lum (vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
   void main () {
-    vec2 screen = vec2(vUv.x, 1.0 - vUv.y);
-    vec2 vuv = vec2(1.0 - screen.x, screen.y);
-    vuv = 0.5 + (vuv - 0.5) * uFit;
-    float e = abs(lum(texture2D(uVideo, vuv).rgb) - lum(texture2D(uPrev, vuv).rgb));
-    gl_FragColor = vec4(texture2D(uDye, vUv).rgb + uTint * smoothstep(0.03, 0.3, e), 1.0);
+    float e = texture2D(uEdge, vUv).x;
+    gl_FragColor = vec4(texture2D(uDye, vUv).rgb + uTint * e, 1.0);
   }`;
 
 const particleDrawVS = `#version 300 es
   precision highp float;
-  uniform sampler2D uState, uVideo;
+  uniform sampler2D uState, uEdge;
   uniform float uGrid, uPointScale;
-  uniform vec2 uFit;
   uniform vec3 uRampA, uRampB;
   out vec3 vColor;
-  out float vEnergy;
   void main () {
     int W = int(uGrid);
     ivec2 ij = ivec2(gl_VertexID % W, gl_VertexID / W);
     vec4 st = texelFetch(uState, ij, 0);
     vec2 home = (vec2(ij) + 0.5) / uGrid;
     vec2 p = home + st.xy;
-    vec2 vuv = vec2(1.0 - home.x, home.y);
-    vuv = 0.5 + (vuv - 0.5) * uFit;
-    vec3 cam = textureLod(uVideo, vuv, 0.0).rgb;
-    float l = dot(cam, vec3(0.299, 0.587, 0.114));
-    vEnergy = clamp(length(st.zw) * 7.0, 0.0, 1.0);
-    vColor = mix(uRampA, uRampB, clamp(l * l * 1.5, 0.0, 1.0)) + cam * 0.10;
+    float E = textureLod(uEdge, vec2(p.x, 1.0 - p.y), 0.0).x;
+    float energy = clamp(length(st.zw) * 6.0, 0.0, 1.0);
+    /* uniform embers in the flux palette: dim everywhere, blazing on the outline */
+    vColor = uRampA * 0.5 + uRampB * (0.06 + E * 1.5 + energy * 0.45);
     gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-    gl_PointSize = uPointScale * (0.45 + l * 0.75) * (1.0 + vEnergy);
+    gl_PointSize = uPointScale;
   }`;
 const particleDrawFS = `#version 300 es
   precision highp float;
   in vec3 vColor;
-  in float vEnergy;
   out vec4 frag;
   void main () {
     vec2 d = gl_PointCoord - 0.5;
-    float a = smoothstep(0.25, 0.04, dot(d, d));
-    frag = vec4(vColor * (0.62 + vEnergy * 1.1), 1.0) * a;
+    float a = smoothstep(0.25, 0.05, dot(d, d));
+    frag = vec4(vColor, 1.0) * a;
   }`;
 
+const edgeProgram        = new Program(baseVertexShader, edgeShader);
+const blurProgram        = new Program(baseVertexShader, blurShader);
 const particleSimProgram = new Program(baseVertexShader, particleSimShader);
 const flowVelProgram     = new Program(baseVertexShader, flowVelShader);
 const flowDyeProgram     = new Program(baseVertexShader, flowDyeShader);
@@ -1154,30 +1219,79 @@ const particleDrawProgram = (() => {
   const p = createProgram(
     compileShader(gl.VERTEX_SHADER, particleDrawVS),
     compileShader(gl.FRAGMENT_SHADER, particleDrawFS));
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    setTimeout(() => toast('particle shader failed on this GPU'), 2000);
   return { program: p, uniforms: getUniforms(p), bind () { gl.useProgram(p); } };
 })();
+const emptyVAO = gl.createVertexArray();   // the points pass uses gl_VertexID only
 
-function mirrorPasses (dt, now) {
+/* face tracking: native FaceDetector when available, smoothed; otherwise a
+   generous center-weighted ellipse (y-up screen01) */
+const face = { x: 0.5, y: 0.55, rx: 0.46, ry: 0.58, tx: 0.5, ty: 0.55, trx: 0.46, try_: 0.58 };
+if ('FaceDetector' in window) {
+  let fd = null;
+  try { fd = new FaceDetector({ fastMode: true, maxDetectedFaces: 1 }); } catch (e) {}
+  if (fd) setInterval(async () => {
+    if (usingGhost || video.readyState < 2) return;
+    try {
+      const faces = await fd.detect(video);
+      if (!faces.length) return;
+      const b = faces[0].boundingBox;
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const fit = coverFit();
+      const vx = (b.x + b.width / 2) / vw, vy = (b.y + b.height / 2) / vh;
+      const sx = 1 - (0.5 + (vx - 0.5) / fit[0]);      // un-cover-fit + un-mirror
+      const syUp = 1 - (0.5 + (vy - 0.5) / fit[1]);
+      face.tx = sx; face.ty = syUp;
+      face.trx = Math.min(0.5, (b.width / vw) / fit[0] * 0.85);
+      face.try_ = Math.min(0.6, (b.height / vh) / fit[1] * 1.0);
+    } catch (e) {}
+  }, 350);
+}
+
+function fieldPasses () {
   const fit = coverFit();
-  /* optical flow -> force into the fluid velocity field */
+  // smooth the tracked ellipse
+  face.x += (face.tx - face.x) * 0.12;
+  face.y += (face.ty - face.y) * 0.12;
+  face.rx += (face.trx - face.rx) * 0.12;
+  face.ry += (face.try_ - face.ry) * 0.12;
+  /* sobel edges */
+  edgeProgram.bind();
+  gl.uniform2f(edgeProgram.uniforms.texelSize, 1 / EDGE_RES, 1 / EDGE_RES);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]);
+  gl.uniform1i(edgeProgram.uniforms.uVideo, 0);
+  gl.uniform2f(edgeProgram.uniforms.uFit, fit[0], fit[1]);
+  gl.uniform4f(edgeProgram.uniforms.uFace, face.x, face.y, face.rx, face.ry);
+  blit(edgeRaw);
+  /* blur -> smooth attraction potential */
+  blurProgram.bind();
+  gl.uniform2f(blurProgram.uniforms.texelSize, 1 / EDGE_RES, 1 / EDGE_RES);
+  gl.uniform1i(blurProgram.uniforms.uTexture, edgeRaw.attach(0));
+  gl.uniform2f(blurProgram.uniforms.uDir, 1 / EDGE_RES, 0);
+  blit(edgeTmp);
+  gl.uniform1i(blurProgram.uniforms.uTexture, edgeTmp.attach(0));
+  gl.uniform2f(blurProgram.uniforms.uDir, 0, 1 / EDGE_RES);
+  blit(edgeBlur);
+  /* optical flow -> force into the fluid */
   flowVelProgram.bind();
   gl.uniform2f(flowVelProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
   gl.uniform1i(flowVelProgram.uniforms.uVelocity, velocity.read.attach(0));
-  gl.uniform1i(flowVelProgram.uniforms.uVideo, (gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]), 1));
-  gl.uniform1i(flowVelProgram.uniforms.uPrev, (gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, vidTex[1 - vidCur]), 2));
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]);
+  gl.uniform1i(flowVelProgram.uniforms.uVideo, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, vidTex[1 - vidCur]);
+  gl.uniform1i(flowVelProgram.uniforms.uPrev, 2);
   gl.uniform2f(flowVelProgram.uniforms.uFit, fit[0], fit[1]);
   gl.uniform1f(flowVelProgram.uniforms.uAmp, 220.0);
   blit(velocity.write);
   velocity.swap();
-  /* ...and a faint dye deposit so motion paints */
+  /* outline deposits ink */
   const ramp = RAMPS[paletteMode] || RAMPS.matrix;
   flowDyeProgram.bind();
   gl.uniform2f(flowDyeProgram.uniforms.texelSize, dye.texelSizeX, dye.texelSizeY);
   gl.uniform1i(flowDyeProgram.uniforms.uDye, dye.read.attach(0));
-  gl.uniform1i(flowDyeProgram.uniforms.uVideo, (gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]), 1));
-  gl.uniform1i(flowDyeProgram.uniforms.uPrev, (gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, vidTex[1 - vidCur]), 2));
-  gl.uniform2f(flowDyeProgram.uniforms.uFit, fit[0], fit[1]);
-  gl.uniform3f(flowDyeProgram.uniforms.uTint, ramp[1][0] * 0.045, ramp[1][1] * 0.045, ramp[1][2] * 0.045);
+  gl.uniform1i(flowDyeProgram.uniforms.uEdge, edgeBlur.attach(1));
+  gl.uniform3f(flowDyeProgram.uniforms.uTint, ramp[1][0] * 0.004, ramp[1][1] * 0.004, ramp[1][2] * 0.004);
   blit(dye.write);
   dye.swap();
 }
@@ -1186,6 +1300,7 @@ function particleStep (dt, now) {
   gl.uniform2f(particleSimProgram.uniforms.texelSize, 1 / GRID, 1 / GRID);
   gl.uniform1i(particleSimProgram.uniforms.uState, pState.read.attach(0));
   gl.uniform1i(particleSimProgram.uniforms.uFluidVel, velocity.read.attach(1));
+  gl.uniform1i(particleSimProgram.uniforms.uEdge, edgeBlur.attach(2));
   gl.uniform2f(particleSimProgram.uniforms.uVelTexel, velocity.texelSizeX, velocity.texelSizeY);
   gl.uniform1f(particleSimProgram.uniforms.uDt, dt);
   gl.uniform1f(particleSimProgram.uniforms.uTime, now / 1000);
@@ -1193,21 +1308,21 @@ function particleStep (dt, now) {
   pState.swap();
 }
 function particleDraw () {
-  const fit = coverFit();
   const ramp = RAMPS[paletteMode] || RAMPS.matrix;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
   particleDrawProgram.bind();
+  gl.bindVertexArray(emptyVAO);
   gl.uniform1i(particleDrawProgram.uniforms.uState, pState.read.attach(0));
-  gl.uniform1i(particleDrawProgram.uniforms.uVideo, (gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, vidTex[vidCur]), 1));
+  gl.uniform1i(particleDrawProgram.uniforms.uEdge, edgeBlur.attach(1));
   gl.uniform1f(particleDrawProgram.uniforms.uGrid, GRID);
-  gl.uniform1f(particleDrawProgram.uniforms.uPointScale, (gl.drawingBufferHeight / GRID) * 1.25);
-  gl.uniform2f(particleDrawProgram.uniforms.uFit, fit[0], fit[1]);
+  gl.uniform1f(particleDrawProgram.uniforms.uPointScale, Math.max(1.5, (gl.drawingBufferHeight / GRID) * 0.7));
   gl.uniform3f(particleDrawProgram.uniforms.uRampA, ramp[0][0], ramp[0][1], ramp[0][2]);
   gl.uniform3f(particleDrawProgram.uniforms.uRampB, ramp[1][0], ramp[1][1], ramp[1][2]);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   gl.drawArrays(gl.POINTS, 0, GRID * GRID);
+  gl.bindVertexArray(null);
   gl.disable(gl.BLEND);
 }
 
@@ -1290,7 +1405,7 @@ function tick (now) {
   autopilot(now);
   Audio.drone(now - lastInteraction < 8000); // autopilot doesn't bump lastInteraction
   if (ignited) uploadVideo(now);
-  if (ignited && vidFrames >= 2) mirrorPasses(dt, now);
+  if (ignited && vidFrames >= 2) fieldPasses();
   step(dt);
   render();
   if (ignited && vidFrames >= 2) { particleStep(dt, now); particleDraw(); }

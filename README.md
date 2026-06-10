@@ -13,7 +13,7 @@ No libraries. No build step. No server — the feed never leaves your device.
 
 ## Bonus: the fluid mirror
 
-[`fluid.html`](fluid.html) — **[try it live](https://trusch.github.io/echo/fluid.html)** — is the fusion of ECHO with its sibling [FLUX](https://github.com/trusch/flux): a real Navier-Stokes fluid simulation where ~65k camera particles *ride the velocity field*. Stir with a finger and your face swirls away like ink, springs always pull it back together, and the optical flow of your real motion injects force into the water itself — wave at the camera to stir the mirror without touching it. Default palette: matrix green.
+[`fluid.html`](fluid.html) — **[try it live](https://trusch.github.io/echo/fluid.html)** — is the fusion of ECHO with its sibling [FLUX](https://github.com/trusch/flux), keeping FLUX's visual language. The camera is integrated as an invisible force field, not as pixels: a Sobel edge pass extracts your outline (positioned by the native `FaceDetector` API where available), blurred into a smooth attraction potential. ~65k uniform palette-colored embers ride the real fluid simulation, get drawn toward the outline and captured on its ridges — and the outline continuously deposits glowing ink into the fluid itself, so your silhouette is literally drawn from flux. Stir it and your face swirls away, then redraws. Wave at the camera and optical flow stirs the water hands-free. Default palette: matrix green.
 
 ## What it does
 
