@@ -2,6 +2,10 @@
 
 Single self-contained `index.html` — mobile-first showcase app (camera → ~100k GPGPU particles with optical-flow wind). Part of the single-prompt AI showcase series (siblings: `~/projects/flux`, `~/projects/portal`).
 
+There are TWO apps in this repo, both deployed via Pages:
+- `index.html` — ECHO, the particle mirror (camera → particles).
+- `fluid.html` — ECHO ∿ FLUX, the fluid mirror (FLUX fluid core + camera particles drag-coupled to the velocity field + optical flow injected as fluid force). Forked from flux/index.html; shares its invariants (resize-preserving FBOs, unlock dance, activity-gated drone).
+
 ## Invariants
 
 - ONE file, zero dependencies, no build step, zero network requests (the privacy promise in the README and the in-app gate copy depends on this — never add analytics, fonts, CDNs).

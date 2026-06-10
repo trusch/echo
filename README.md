@@ -11,6 +11,10 @@ No libraries. No build step. No server — the feed never leaves your device.
   <em>Headless verification shot using Chromium's fake camera test pattern, software-rendered. A real face on a real GPU looks far better.</em>
 </p>
 
+## Bonus: the fluid mirror
+
+[`fluid.html`](fluid.html) — **[try it live](https://trusch.github.io/echo/fluid.html)** — is the fusion of ECHO with its sibling [FLUX](https://github.com/trusch/flux): a real Navier-Stokes fluid simulation where ~65k camera particles *ride the velocity field*. Stir with a finger and your face swirls away like ink, springs always pull it back together, and the optical flow of your real motion injects force into the water itself — wave at the camera to stir the mirror without touching it. Default palette: matrix green.
+
 ## What it does
 
 You see yourself as a hundred thousand particles of light. Each particle knows its home in the mirror; springs hold the image together — and everything you do tears it apart:
