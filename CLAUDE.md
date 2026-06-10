@@ -11,7 +11,7 @@ There are TWO apps in this repo, both deployed via Pages:
 - ONE file, zero dependencies, no build step, zero network requests (the privacy promise in the README and the in-app gate copy depends on this — never add analytics, fonts, CDNs).
 - Public repo `trusch/echo`, deployed via GitHub Pages from `main` root. Pushing to `main` is allowed for this repo.
 - Requires WebGL2 + EXT_color_buffer_float/half_float (state textures are RGBA16F render targets).
-- Audio changes must keep the unlock dance AND the activity-gating of the pad (ambient beds must fade out when idle — user-mandated across the series).
+- Audio changes must keep the unlock dance, the iPad audio-session promotion (audioSession.type='playback' + silent <audio> keepalive), AND the activity-gating of the pad (ambient beds must fade out when idle — user-mandated across the series).
 - Camera fallback (procedural ghost) must keep working — test the denied-permission path.
 
 ## Verification
