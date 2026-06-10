@@ -901,10 +901,25 @@ const Audio = (() => {
        element promotes the session, making WebAudio audible regardless
        of the switch. Both are no-ops elsewhere. */
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
-    try {
+    /* The silent keepalive exists ONLY for the iPad/iPhone mute switch.
+       The looping media element itself caused audible crackle on Android
+       (a 9ms WAV loops ~110x/sec through the media pipeline), so it is
+       strictly gated to Apple touch devices — and generated at runtime
+       as a full second of silence so loop boundaries are rare. */
+    const isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isApple) try {
+      const sr = 8000, n = sr, wav = new Uint8Array(44 + n);
+      const dv = new DataView(wav.buffer);
+      const wstr = (o, s) => { for (let i = 0; i < s.length; i++) wav[o + i] = s.charCodeAt(i); };
+      wstr(0, 'RIFF'); dv.setUint32(4, 36 + n, true); wstr(8, 'WAVEfmt ');
+      dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+      dv.setUint32(24, sr, true); dv.setUint32(28, sr, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true);
+      wstr(36, 'data'); dv.setUint32(40, n, true);
+      wav.fill(128, 44);   /* 8-bit PCM silence */
       const el = document.createElement('audio');
       el.loop = true; el.setAttribute('playsinline', ''); el.preload = 'auto';
-      el.src = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+      el.src = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
       const pp = el.play();
       if (pp && pp.catch) pp.catch(() => {});
       window.__audioSessionKeepalive = el;
