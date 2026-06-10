@@ -900,7 +900,9 @@ const Audio = (() => {
        also route a looping silent <audio> element — a playing media
        element promotes the session, making WebAudio audible regardless
        of the switch. Both are no-ops elsewhere. */
-    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    /* audioSession is Apple-gated too: Chrome on Android also implements
+       the Audio Session API, and setting type='playback' there changes
+       platform audio routing — suspect in an Android crackle report. */
     /* The silent keepalive exists ONLY for the iPad/iPhone mute switch.
        The looping media element itself caused audible crackle on Android
        (a 9ms WAV loops ~110x/sec through the media pipeline), so it is
@@ -909,6 +911,7 @@ const Audio = (() => {
     const isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     if (isApple) try {
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
       const sr = 8000, n = sr, wav = new Uint8Array(44 + n);
       const dv = new DataView(wav.buffer);
       const wstr = (o, s) => { for (let i = 0; i < s.length; i++) wav[o + i] = s.charCodeAt(i); };
